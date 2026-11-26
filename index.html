@@ -3675,38 +3675,10 @@
   const voiceEls = {};
   const voiceWanted = qs.get('novoice') !== '1';
 
-  // ---- 台词增益：让对白比背景音乐明显高一层 ----
-  // 第一次点击先用原生满音量保证出声，同时把 AudioContext 唤醒；
-  // 之后每次对话都走增益链，整体提升约 +4.6dB。不支持就安静退回原生播放。
-  const VOICE_GAIN = 2.4;
-  let vCtx = null;
-  const vChains = {};
-  function doBoost(a, who) {
-    if (vChains[who] || !vCtx || vCtx.state !== 'running') return false;
-    try {
-      const src = vCtx.createMediaElementSource(a);
-      const g = vCtx.createGain();
-      g.gain.value = VOICE_GAIN;
-      src.connect(g);
-      g.connect(vCtx.destination);
-      vChains[who] = { src: src, gain: g };
-      return true;
-    } catch (e) { return false; }
-  }
-  function voiceBoost(a, who) {
-    try {
-      if (vChains[who]) {
-        if (vCtx.state === 'suspended') vCtx.resume().catch(function () {});
-        return;
-      }
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      if (!vCtx) vCtx = new AC();
-      if (doBoost(a, who)) return;
-      // 还没唤醒好：唤醒后补接（本次或下一次对话生效）
-      vCtx.resume().then(function () { doBoost(a, who); }).catch(function () {});
-    } catch (e) { /* 不支持就安静地退回原生播放 */ }
-  }
+  // ---- 台词音量 ----
+  // 只用原生 audio 元素（满音量），不接 Web Audio —— 一旦把 audio 元素路由进
+  // AudioContext，浏览器在挂起 context 时会让它彻底无声，得不偿失。
+  // 想让对白更清楚，改成「说话时把 BGM 完全压掉」，这在 duckBgm 里做。
 
   function playVoice(who) {
     if (!voiceWanted) return;
@@ -3729,11 +3701,24 @@
     try {
       if (a.readyState === 0) a.load();
       a.volume = 1;              // 台词始终满音量
-      voiceBoost(a, who);
       a.currentTime = 0;
       const p = a.play();
       if (p && p.catch) p.catch(function () {});
     } catch (e) {}
+  }
+
+  // ?dbgvoice=1 把配音状态实时写进标签标题，方便排查「点了没声音」
+  if (qs.get('dbgvoice') === '1') {
+    setInterval(function () {
+      const a = voiceEls.kirito || voiceEls.asuna;
+      if (!a) { document.title = 'dbg: 还没创建音频元素'; return; }
+      document.title = 'dbg rs=' + a.readyState +
+        ' paused=' + a.paused +
+        ' t=' + a.currentTime.toFixed(2) +
+        ' d=' + (isFinite(a.duration) ? a.duration.toFixed(2) : '?') +
+        ' vol=' + a.volume +
+        ' err=' + (a.error ? a.error.code : 'none');
+    }, 500);
   }
 
   // 说话时把背景音乐压低，说完恢复
@@ -3744,7 +3729,7 @@
     if (on && !ducked) {
       ducked = true;
       bgmEl.dataset.volBefore = String(bgmEl.volume);
-      bgmEl.volume = Math.min(bgmEl.volume, 0.015);   // 说话时 BGM 几乎退到无声，把声道让给台词
+      bgmEl.volume = Math.min(bgmEl.volume, 0);   // 说话时 BGM 几乎退到无声，把声道让给台词
     } else if (!on && ducked) {
       ducked = false;
       const v = parseFloat(bgmEl.dataset.volBefore);
