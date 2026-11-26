@@ -41,6 +41,37 @@
     color: rgba(226, 232, 255, .32); letter-spacing: .16em;
     pointer-events: none; user-select: none; white-space: nowrap;
   }
+
+  /* ---- 对话气泡 ---- */
+  .bubble {
+    position: fixed; left: 0; top: 0;
+    max-width: 300px;
+    padding: 9px 13px;
+    background: rgba(255, 250, 241, .97);
+    color: #2b2620;
+    border-radius: 13px;
+    font-size: 13px; line-height: 1.55; letter-spacing: .3px;
+    font-family: "Noto Serif SC", "Songti SC", "SimSun", serif;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .42), inset 0 0 0 1px rgba(255, 255, 255, .4);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -100%) scale(.86);
+    transform-origin: 50% 100%;
+    transition: opacity .2s ease, transform .2s ease;
+    z-index: 40;
+    white-space: pre-wrap;
+  }
+  .bubble.show {
+    opacity: 1;
+    transform: translate(-50%, calc(-100% - 6px)) scale(1);
+  }
+  .bubble::after {
+    content: '';
+    position: absolute; left: 50%; bottom: -7px; margin-left: -7px;
+    border: 7px solid transparent;
+    border-top-color: rgba(255, 250, 241, .97);
+    border-bottom: 0;
+  }
   .title {
     position: fixed; left: 26px; top: 22px;
     font-size: 12px; line-height: 1.5;
@@ -121,8 +152,10 @@
   <button data-toggle="bloom" class="on">辉光</button>
   <button data-toggle="mode">入场·落下</button>
   <button data-toggle="replay">重播入场</button>
+  <button data-toggle="shot" id="shotBtn">截图保存</button>
   <div class="row music">
     <button data-toggle="bgm" id="bgmToggle" title="背景音乐 开 / 关">♪ 音乐</button>
+    <button data-toggle="track" id="bgmTrack" title="切换曲目（the first town / crossing field / Overfly）">换曲</button>
     <input id="bgmVol" type="range" min="0" max="100" value="45" aria-label="背景音乐音量" title="音量">
   </div>
 </div>
@@ -131,7 +164,8 @@
 
 <div class="vignette"></div>
 <div class="grain"></div>
-<div class="hint">拖拽旋转 · 滚轮缩放 · 右键平移 · 双击复位 · 点画面开音乐</div>
+<div class="bubble" id="bubble"></div>
+<div class="hint">拖拽旋转 · 滚轮缩放 · 右键平移 · 双击复位 · 点小人说话 · 点画面开音乐</div>
 
 
 <script>
@@ -1387,6 +1421,10 @@
   scene.fog = new T.Fog('#0f0d1c', 52, 135);
 
   const qs = new URLSearchParams(location.search);
+
+  // 背景音乐播放列表（点「换曲」按顺序循环）
+  const BGM_TRACKS = ['bgm.mp3', 'bgm2.mp3', 'bgm3.mp3'];
+
   const camA = parseFloat(qs.get('a'));   // 方位角
   const camD = parseFloat(qs.get('d'));   // 距离
   const camH = parseFloat(qs.get('h'));   // 高度
@@ -2946,32 +2984,93 @@
     });
   })();
 
-  /* ---------- 两个小人 ---------- */
-  function makeFigure(skin, hair, cloth, s) {
+  /* ---------- 桐人与亚丝娜 ---------- */
+  function figPart(g, geo, mat, x, y, z, rz) {
+    const m = new T.Mesh(geo, mat);
+    m.position.set(x || 0, y || 0, z || 0);
+    if (rz) m.rotation.z = rz;
+    m.castShadow = true;
+    g.add(m);
+    return m;
+  }
+
+  const SKIN_F = toon('#f2d3b3');
+  const HAIR_K = toon('#1a1b23');    // 桐人：黑发
+  const COAT_K = toon('#24252f');    // 桐人：黑外套
+  const PANTS_K = toon('#15161d');   // 桐人：黑裤
+  const HAIR_A = toon('#8d5c37');    // 亚丝娜：栗色长发
+  const SUIT_A = toon('#f3eee3');    // 亚丝娜：白色骑士服
+  const TRIM_A = toon('#b8402f');    // 亚丝娜：红色饰边
+
+  function makeKirito() {
     const g = new T.Group();
-    const body = new T.Mesh(new T.CapsuleGeometry(0.11, 0.42, 4, 8), toon(cloth));
-    body.position.y = 0.62;
-    body.castShadow = true;
-    g.add(body);
-    const head = new T.Mesh(new T.SphereGeometry(0.13, 12, 12), toon(skin));
-    head.position.y = 1.03;
-    head.castShadow = true;
-    g.add(head);
-    const cap = new T.Mesh(new T.SphereGeometry(0.135, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), toon(hair));
-    cap.position.y = 1.05;
-    g.add(cap);
-    g.scale.setScalar(s);
+    // 双腿
+    figPart(g, new T.CapsuleGeometry(0.05, 0.24, 4, 8), PANTS_K, -0.058, 0.19);
+    figPart(g, new T.CapsuleGeometry(0.05, 0.24, 4, 8), PANTS_K, 0.058, 0.19);
+    // 外套下摆（略张开）
+    figPart(g, new T.CylinderGeometry(0.125, 0.168, 0.24, 10, 1, true), COAT_K, 0, 0.52);
+    // 上身
+    figPart(g, new T.CapsuleGeometry(0.098, 0.24, 4, 10), COAT_K, 0, 0.80);
+    // 双臂
+    figPart(g, new T.CapsuleGeometry(0.034, 0.19, 4, 8), COAT_K, -0.125, 0.80, 0, 0.16);
+    figPart(g, new T.CapsuleGeometry(0.034, 0.19, 4, 8), COAT_K, 0.125, 0.80, 0, -0.16);
+    // 头
+    figPart(g, new T.SphereGeometry(0.108, 12, 12), SKIN_F, 0, 1.10);
+    // 短刺发：头顶一顶半球 + 几撮翘起的发尖
+    figPart(g, new T.SphereGeometry(0.114, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.58), HAIR_K, 0, 1.13);
+    const spikes = [[0, 0.075, 0, 0], [-0.062, 0.06, 0.03, 0.5], [0.062, 0.06, 0.03, -0.5],
+      [0, 0.055, -0.07, 0.42], [-0.05, 0.05, -0.055, 0.6], [0.05, 0.05, -0.055, -0.6]];
+    for (let i = 0; i < spikes.length; i++) {
+      const s = spikes[i];
+      figPart(g, new T.ConeGeometry(0.038, 0.13, 5), HAIR_K, s[0], 1.16 + s[1] * 0.6, s[2], s[3]);
+    }
+    // 背后黑剑（Elucidator）
+    const sword = new T.Group();
+    sword.position.set(0.01, 0.86, -0.10);
+    sword.rotation.z = 0.34;
+    figPart(sword, new T.BoxGeometry(0.032, 0.56, 0.012), toon('#2b2d3a'), 0, 0.20, 0);
+    figPart(sword, new T.BoxGeometry(0.085, 0.02, 0.022), toon('#6b5a3e'), 0, -0.10, 0);
+    figPart(sword, new T.BoxGeometry(0.026, 0.13, 0.02), toon('#40301f'), 0, -0.19, 0);
+    g.add(sword);
     return g;
   }
 
-  const kirito = makeFigure('#e8c9a8', '#24242c', '#2b2b36', 1.0);
-  kirito.position.set(0.4, 0.21, 2.75);
+  function makeAsuna() {
+    const g = new T.Group();
+    // 红靴与腿（裙摆下露一截）
+    figPart(g, new T.CapsuleGeometry(0.042, 0.15, 4, 8), TRIM_A, -0.05, 0.10);
+    figPart(g, new T.CapsuleGeometry(0.042, 0.15, 4, 8), TRIM_A, 0.05, 0.10);
+    // 长裙（白色，下摆张开）
+    figPart(g, new T.CylinderGeometry(0.112, 0.205, 0.46, 12), SUIT_A, 0, 0.35);
+    // 红色裙边
+    figPart(g, new T.CylinderGeometry(0.206, 0.210, 0.045, 12), TRIM_A, 0, 0.135);
+    // 上身
+    figPart(g, new T.CapsuleGeometry(0.088, 0.20, 4, 10), SUIT_A, 0, 0.78);
+    // 红色腰带
+    figPart(g, new T.CylinderGeometry(0.096, 0.096, 0.042, 12), TRIM_A, 0, 0.62);
+    // 双臂
+    figPart(g, new T.CapsuleGeometry(0.032, 0.17, 4, 8), SUIT_A, -0.112, 0.78, 0, 0.15);
+    figPart(g, new T.CapsuleGeometry(0.032, 0.17, 4, 8), SUIT_A, 0.112, 0.78, 0, -0.15);
+    // 头
+    figPart(g, new T.SphereGeometry(0.104, 12, 12), SKIN_F, 0, 1.06);
+    // 头顶长发
+    figPart(g, new T.SphereGeometry(0.110, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), HAIR_A, 0, 1.09);
+    // 背后披下来的长发
+    figPart(g, new T.CapsuleGeometry(0.072, 0.30, 4, 10), HAIR_A, 0, 0.90, -0.072);
+    // 两侧垂发
+    figPart(g, new T.CapsuleGeometry(0.03, 0.20, 4, 8), HAIR_A, -0.095, 0.94, -0.01);
+    figPart(g, new T.CapsuleGeometry(0.03, 0.20, 4, 8), HAIR_A, 0.095, 0.94, -0.01);
+    return g;
+  }
+
+  const kirito = makeKirito();
+  kirito.position.set(0.4, 0.19, 2.75);
   kirito.rotation.y = -1.1;
   root.add(kirito);
 
-  const asuna = makeFigure('#f0d2b4', '#a4623f', '#e6ddcc', 0.96);
-  asuna.position.set(1.32, 0.90, -1.02);
-  asuna.rotation.y = 0.4;
+  const asuna = makeAsuna();
+  asuna.position.set(0.0, 0.925, -1.20);
+  asuna.rotation.y = 0.12;
   root.add(asuna);
 
   /* ---------- 萤火虫 ---------- */
@@ -3549,7 +3648,248 @@
     if (qs.get('dbg') === '1') document.title = ASSEMBLE.stat();
     controls.update();
     post.render(scene, camera);
+    bubbleUpdate();
+    if (shotPending) { shotPending = false; doSaveShot(); }
   }
+
+  /* ---------- 截图保存 + 对话气泡 ---------- */
+  const bubbleEl = document.getElementById('bubble');
+  let shotPending = false;
+  let bubbleWho = null;
+  let bubbleUntil = 0;
+  const bubbleIdx = { kirito: 0, asuna: 0 };
+
+  const LINES = {
+    kirito: [
+      '呐，亚丝娜，我们之间的关系，是仅限于这个世界吗？'
+    ],
+    asuna: [
+      '我要生气了，桐人。即使这里是虚拟世界，但是我对你的感情是认真的。如果能回到原来的世界，我一定会与桐人重逢，并再次爱上你。'
+    ]
+  };
+  const FIG = { kirito: kirito, asuna: asuna };
+  const FIG_H = { kirito: 1.46, asuna: 1.42 };
+
+  /* ---- 台词配音：点小人时播对应那句 ---- */
+  const VOICE_SRC = { kirito: 'voice_kirito.mp3', asuna: 'voice_asuna.mp3' };
+  const voiceEls = {};
+  const voiceWanted = qs.get('novoice') !== '1';
+
+  // ---- 台词增益：让对白比背景音乐明显高一层 ----
+  // 第一次点击先用原生满音量保证出声，同时把 AudioContext 唤醒；
+  // 之后每次对话都走增益链，整体提升约 +4.6dB。不支持就安静退回原生播放。
+  const VOICE_GAIN = 2.4;
+  let vCtx = null;
+  const vChains = {};
+  function doBoost(a, who) {
+    if (vChains[who] || !vCtx || vCtx.state !== 'running') return false;
+    try {
+      const src = vCtx.createMediaElementSource(a);
+      const g = vCtx.createGain();
+      g.gain.value = VOICE_GAIN;
+      src.connect(g);
+      g.connect(vCtx.destination);
+      vChains[who] = { src: src, gain: g };
+      return true;
+    } catch (e) { return false; }
+  }
+  function voiceBoost(a, who) {
+    try {
+      if (vChains[who]) {
+        if (vCtx.state === 'suspended') vCtx.resume().catch(function () {});
+        return;
+      }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!vCtx) vCtx = new AC();
+      if (doBoost(a, who)) return;
+      // 还没唤醒好：唤醒后补接（本次或下一次对话生效）
+      vCtx.resume().then(function () { doBoost(a, who); }).catch(function () {});
+    } catch (e) { /* 不支持就安静地退回原生播放 */ }
+  }
+
+  function playVoice(who) {
+    if (!voiceWanted) return;
+    // 同一时刻只让一个人说话：先把另一个的语音停掉
+    for (const k in voiceEls) {
+      if (k === who) continue;
+      const other = voiceEls[k];
+      if (other && !other.paused) {
+        try { other.pause(); other.currentTime = 0; } catch (e) {}
+      }
+    }
+    let a = voiceEls[who];
+    if (!a) {
+      a = new Audio();
+      a.src = VOICE_SRC[who];
+      a.preload = 'auto';
+      a.addEventListener('error', function () { /* 没放音频文件就安静跳过 */ });
+      voiceEls[who] = a;
+    }
+    try {
+      if (a.readyState === 0) a.load();
+      a.volume = 1;              // 台词始终满音量
+      voiceBoost(a, who);
+      a.currentTime = 0;
+      const p = a.play();
+      if (p && p.catch) p.catch(function () {});
+    } catch (e) {}
+  }
+
+  // 说话时把背景音乐压低，说完恢复
+  const bgmEl = document.getElementById('bgm');
+  let ducked = false;
+  function duckBgm(on) {
+    if (!bgmEl) return;
+    if (on && !ducked) {
+      ducked = true;
+      bgmEl.dataset.volBefore = String(bgmEl.volume);
+      bgmEl.volume = Math.min(bgmEl.volume, 0.015);   // 说话时 BGM 几乎退到无声，把声道让给台词
+    } else if (!on && ducked) {
+      ducked = false;
+      const v = parseFloat(bgmEl.dataset.volBefore);
+      if (isFinite(v)) bgmEl.volume = v;
+    }
+  }
+
+  let saySeq = 0;
+  function bubbleSay(who) {
+    const arr = LINES[who];
+    if (!arr || !bubbleEl) return;
+    const seq = ++saySeq;
+    const text = arr[bubbleIdx[who] % arr.length];
+    bubbleIdx[who]++;
+    bubbleWho = who;
+    bubbleEl.textContent = text;
+    bubbleEl.classList.add('show');
+    // 配音（没放音频文件时静默跳过）
+    playVoice(who);
+    const a = voiceEls[who];
+    const vd = (a && isFinite(a.duration) && a.duration > 0) ? a.duration * 1000 : 0;
+    bubbleUntil = performance.now() + Math.max(4200, vd + 1200);
+    duckBgm(true);
+    // 只有「最新一次说话」才有权把背景音乐恢复，避免上一句的定时器把下一句的 BGM 抬回来
+    if (a) a.addEventListener('ended', function () { if (seq === saySeq) duckBgm(false); }, { once: true });
+    setTimeout(function () { if (seq === saySeq) duckBgm(false); }, Math.max(1500, vd + 600));
+  }
+
+  function bubbleUpdate() {
+    if (!bubbleWho || !bubbleEl) return;
+    if (performance.now() > bubbleUntil) {
+      bubbleEl.classList.remove('show');
+      bubbleWho = null;
+      return;
+    }
+    const f = FIG[bubbleWho];
+    if (!f) return;
+    const v = new T.Vector3();
+    f.getWorldPosition(v);
+    v.y += FIG_H[bubbleWho];
+    v.project(camera);
+    if (v.z > 1) { bubbleEl.style.left = '-9999px'; return; }
+    bubbleEl.style.left = ((v.x * 0.5 + 0.5) * window.innerWidth).toFixed(1) + 'px';
+    bubbleEl.style.top = ((-v.y * 0.5 + 0.5) * window.innerHeight).toFixed(1) + 'px';
+  }
+
+  // 点小人：先 raycast，小人太小则退化为屏幕距离判定（手机上更好点）
+  const pickRay = new T.Raycaster();
+  const pickNdc = new T.Vector2();
+  const pickV = new T.Vector3();
+  function tryPickFigure(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pickNdc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pickNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    pickRay.setFromCamera(pickNdc, camera);
+    const hits = pickRay.intersectObjects([kirito, asuna], true);
+    if (hits.length) {
+      let o = hits[0].object;
+      while (o && o !== kirito && o !== asuna) o = o.parent;
+      if (o) { bubbleSay(o === kirito ? 'kirito' : 'asuna'); return true; }
+    }
+    let best = null, bestD = 58;
+    ['kirito', 'asuna'].forEach(function (who) {
+      FIG[who].getWorldPosition(pickV);
+      pickV.y += FIG_H[who] * 0.45;
+      pickV.project(camera);
+      if (pickV.z > 1) return;
+      const sx = (pickV.x * 0.5 + 0.5) * rect.width + rect.left;
+      const sy = (-pickV.y * 0.5 + 0.5) * rect.height + rect.top;
+      const d = Math.hypot(clientX - sx, clientY - sy);
+      if (d < bestD) { bestD = d; best = who; }
+    });
+    if (best) { bubbleSay(best); return true; }
+    return false;
+  }
+
+  let downX = 0, downY = 0, downOn = false;
+  renderer.domElement.addEventListener('pointerdown', function (e) {
+    downX = e.clientX; downY = e.clientY; downOn = true;
+  });
+  renderer.domElement.addEventListener('pointerup', function (e) {
+    if (!downOn) return;
+    downOn = false;
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > 8) return; // 拖拽视角不算点人
+    tryPickFigure(e.clientX, e.clientY);
+  });
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function doSaveShot() {
+    const btn = document.getElementById('shotBtn');
+    try {
+      const d = new Date();
+      const name = 'SAO湖畔小屋-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate())
+        + '-' + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()) + '.png';
+      const url = renderer.domElement.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      if (btn) {
+        btn.textContent = '已保存 ✓';
+        setTimeout(function () { btn.textContent = '截图保存'; }, 1500);
+      }
+    } catch (err) {
+      if (btn) {
+        btn.textContent = '保存失败';
+        setTimeout(function () { btn.textContent = '截图保存'; }, 1500);
+      }
+    }
+  }
+
+  // ?say=kirito|asuna 直接冒一句（截图自检用）
+  const qsSay = qs.get('say');
+  if (qsSay === 'kirito' || qsSay === 'asuna') {
+    bubbleSay(qsSay);
+    bubbleUntil = performance.now() + 1e7;
+  }
+
+  // 自检：?dbgfig=1 —— 输出两人包围盒，检查身高与是否贴地
+  if (qs.get('dbgfig') === '1') {
+    setTimeout(function () {
+      const bbK = new T.Box3().setFromObject(kirito);
+      const bbA = new T.Box3().setFromObject(asuna);
+      document.title = 'K y' + bbK.min.y.toFixed(2) + '~' + bbK.max.y.toFixed(2)
+        + ' h' + (bbK.max.y - bbK.min.y).toFixed(2)
+        + ' | A y' + bbA.min.y.toFixed(2) + '~' + bbA.max.y.toFixed(2)
+        + ' h' + (bbA.max.y - bbA.min.y).toFixed(2);
+    }, 1200);
+  }
+
+  // 自检：?dbgshot=1 —— 验证 canvas 能真正导出 PNG
+  if (qs.get('dbgshot') === '1') {
+    setTimeout(function () {
+      try {
+        post.render(scene, camera);
+        const u = renderer.domElement.toDataURL('image/png');
+        document.title = 'SHOT ok bytes=' + u.length;
+      } catch (e) {
+        document.title = 'SHOT err ' + e.message;
+      }
+    }, 1500);
+  }
+
   animate();
 
   /* ---------- 右上角开关 ---------- */
@@ -3570,6 +3910,21 @@
         btn.textContent = '入场·' + ASSEMBLE.cycleMode();
       } else if (btn.dataset.toggle === 'replay') {
         ASSEMBLE.restart();
+      } else if (btn.dataset.toggle === 'shot') {
+        shotPending = true;
+        btn.textContent = '保存中…';
+      } else if (btn.dataset.toggle === 'track') {
+        const el = document.getElementById('bgm');
+        if (el) {
+          const cur = parseInt(el.dataset.track || '0', 10) || 0;
+          const next = (cur + 1) % BGM_TRACKS.length;
+          el.dataset.track = String(next);
+          el.src = BGM_TRACKS[next];
+          el.load();
+          const p = el.play();
+          if (p && p.catch) p.catch(function () {});
+          btn.textContent = '换曲·' + (next + 1);
+        }
       } else if (btn.dataset.theme) {
         applyTheme(btn.dataset.theme);
         panel.querySelectorAll('[data-theme]').forEach(function (b) {
@@ -3587,6 +3942,16 @@
     var savedVol = parseFloat(localStorage.getItem('cabin.bgm.vol'));
     if (!isFinite(savedVol)) savedVol = 0.45;
     bgm.volume = Math.min(1, Math.max(0, savedVol));
+
+    // ?track=1|2|3 直接从指定曲目开始（自检/分享用）
+    var tQ = parseInt(qs.get('track') || '0', 10);
+    if (tQ >= 1 && tQ <= BGM_TRACKS.length) {
+      bgm.dataset.track = String(tQ - 1);
+      bgm.src = BGM_TRACKS[tQ - 1];
+      bgm.load();
+      var tb0 = document.getElementById('bgmTrack');
+      if (tb0) tb0.textContent = '换曲·' + tQ;
+    }
 
     var bgmWanted = qs.get('mute') !== '1';   // 用户是否想让音乐响
     var bgmFailed = false;
