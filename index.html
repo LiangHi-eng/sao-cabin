@@ -81,6 +81,29 @@
     border-color: rgba(255, 228, 186, .9);
     font-weight: 600;
   }
+
+  /* 音量滑块 */
+  .music { align-items: center; gap: 9px; }
+  .music input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 88px; height: 3px; margin: 0; padding: 0;
+    border: none; border-radius: 999px; outline: none; cursor: pointer;
+    background: linear-gradient(90deg,
+      rgba(255, 214, 150, .88) 0%, rgba(255, 214, 150, .88) var(--p, 45%),
+      rgba(150, 170, 215, .20) var(--p, 45%), rgba(150, 170, 215, .20) 100%);
+  }
+  .music input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 11px; height: 11px; border-radius: 50%;
+    background: #ffe6c4; border: 1px solid rgba(255, 255, 255, .55);
+    box-shadow: 0 0 7px rgba(255, 210, 145, .6);
+    cursor: pointer;
+  }
+  .music input[type="range"]::-moz-range-thumb {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: #ffe6c4; border: 1px solid rgba(255, 255, 255, .55);
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -98,11 +121,17 @@
   <button data-toggle="bloom" class="on">辉光</button>
   <button data-toggle="mode">入场·落下</button>
   <button data-toggle="replay">重播入场</button>
+  <div class="row music">
+    <button data-toggle="bgm" id="bgmToggle" title="背景音乐 开 / 关">♪ 音乐</button>
+    <input id="bgmVol" type="range" min="0" max="100" value="45" aria-label="背景音乐音量" title="音量">
+  </div>
 </div>
+
+<audio id="bgm" src="bgm.mp3" loop preload="metadata"></audio>
 
 <div class="vignette"></div>
 <div class="grain"></div>
-<div class="hint">拖拽旋转 · 滚轮缩放 · 右键平移 · 双击复位</div>
+<div class="hint">拖拽旋转 · 滚轮缩放 · 右键平移 · 双击复位 · 点画面开音乐</div>
 
 
 <script>
@@ -3549,6 +3578,90 @@
       }
     });
   }
+  /* ---------- 背景音乐 ---------- */
+  const bgm = document.getElementById('bgm');
+  const bgmToggle = document.getElementById('bgmToggle');
+  const bgmVol = document.getElementById('bgmVol');
+
+  if (bgm) {
+    var savedVol = parseFloat(localStorage.getItem('cabin.bgm.vol'));
+    if (!isFinite(savedVol)) savedVol = 0.45;
+    bgm.volume = Math.min(1, Math.max(0, savedVol));
+
+    var bgmWanted = qs.get('mute') !== '1';   // 用户是否想让音乐响
+    var bgmFailed = false;
+
+    function paintBgm() {
+      var pct = Math.round(bgm.volume * 100);
+      if (bgmVol) {
+        bgmVol.value = String(pct);
+        bgmVol.style.setProperty('--p', pct + '%');
+      }
+      if (bgmToggle) {
+        var playing = !bgm.paused && bgm.volume > 0;
+        bgmToggle.classList.toggle('on', playing);
+        bgmToggle.textContent = bgmFailed ? '♪ 加载失败'
+          : (bgm.volume === 0 ? '♪ 静音'
+          : (playing ? '♪ 播放中' : '♪ 音乐'));
+      }
+    }
+
+    // 只要“想听 + 有音量 + 没在播”，就一直尝试；被浏览器拒了也不放弃
+    var lastReload = 0;
+    function tryPlayBgm() {
+      if (!bgmWanted || bgm.volume === 0 || !bgm.paused) return;
+      if (bgmFailed) {
+        // 上次没加载成功：隔 8 秒重新拉一次，网络恢复/换到能播的地址就能自己好
+        var now = Date.now();
+        if (now - lastReload < 8000) return;
+        lastReload = now;
+        bgmFailed = false;
+        try { bgm.load(); } catch (e) {}
+        paintBgm();
+      }
+      var p = bgm.play();
+      if (p && p.catch) p.catch(function () {});
+    }
+
+    bgm.addEventListener('play', paintBgm);
+    bgm.addEventListener('pause', paintBgm);
+    bgm.addEventListener('volumechange', paintBgm);
+    bgm.addEventListener('canplay', function () { bgmFailed = false; paintBgm(); });
+    bgm.addEventListener('error', function () { bgmFailed = true; paintBgm(); });
+
+    // 任何一次交互都尝试（不是只试第一次）
+    ['pointerdown', 'keydown', 'touchstart', 'click'].forEach(function (ev) {
+      document.addEventListener(ev, tryPlayBgm, { passive: true });
+    });
+    // 兜底轮询：被系统暂停、切后台回来、缓冲断流，都能自己接上
+    setInterval(function () {
+      if (!document.hidden) tryPlayBgm();
+    }, 3000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) tryPlayBgm();
+    });
+
+    if (bgmToggle) {
+      bgmToggle.addEventListener('click', function () {
+        if (!bgm.paused) { bgmWanted = false; bgm.pause(); }
+        else { bgmWanted = true; bgmFailed = false; tryPlayBgm(); }
+      });
+    }
+    if (bgmVol) {
+      bgmVol.addEventListener('input', function () {
+        var v = parseFloat(bgmVol.value) / 100;
+        bgm.volume = v;
+        bgmWanted = v > 0;
+        try { localStorage.setItem('cabin.bgm.vol', v); } catch (e) {}
+        paintBgm();
+        if (v > 0) tryPlayBgm();
+      });
+    }
+
+    paintBgm();
+    tryPlayBgm();
+  }
+
   const qsTheme = qs.get('theme');
   applyTheme(THEMES[qsTheme] ? qsTheme : 'night');
   if (qs.get('nobloom') === '1') post.enabled = false;
